@@ -11,7 +11,7 @@
 #define SHOW_CURSOR (printf("\e[?25h"))
 #define RESET_COLOR (printf("\e[m"))
 
-static struct termios old_termios, new_termios;
+
 
 #define MAX_FRAME_KEYS 4
 #define FRAME_NS 16666667
@@ -23,12 +23,23 @@ static struct termios old_termios, new_termios;
 #define MAX_X 60
 #define MAX_Y 26
 
-
+static struct termios old_termios, new_termios;
 static int exit_loop;
+
+typedef struct {
+	int keys[MAX_FRAME_KEYS];
+	int pos_x;
+	int pos_y;
+	char old_screen[MAX_Y][MAX_X];
+	char screen[MAX_Y][MAX_X];
+} GameState;
+
+
 
 void reset_terminal() {
 	RESET_COLOR;
 	SHOW_CURSOR;
+	CURSOR_TO(MAX_Y+2, 0);
 	fflush(stdout);
 	tcsetattr(STDIN_FILENO, TCSANOW, &old_termios);
 }
@@ -47,7 +58,7 @@ void configure_terminal() {
 	atexit(reset_terminal);
 }
 
-void signal_handler(int signum) {
+void signal_handler(__attribute__((unused)) int signum) {
 	exit_loop = 1;
 }
 
@@ -63,7 +74,7 @@ int read_key(char* buf, int i) {
 	return 0;
 }
 
-int* read_input(int* keys) {
+void read_input(GameState* state) {
 	char buf[4096];
 	int n = read(STDIN_FILENO, buf, sizeof(buf));
 	int key_num = 0;
@@ -73,83 +84,91 @@ int* read_input(int* keys) {
 		if (key == 0) {
 			continue;
 		}
-		keys[key_num] = key;
+		state->keys[key_num] = key;
 		key_num++;
-		if (key_num == 4) {
+		if (key_num == MAX_FRAME_KEYS) {
 			break;
 		}
 	}
-	return keys;
 }
 
-void print_keys(int* keys) {
-	for (int i = 0; i < MAX_FRAME_KEYS; i++){
-		switch (keys[i]) {
-			case 1: printf("Up\n");		break;
-			case 2: printf("Down\n");	break;
-			case 3: printf("Right\n");	break;
-			case 4: printf("Left\n");	break;
-		}
+void clear_keys(GameState* state) {
+	for (int i = 0; i < MAX_FRAME_KEYS; i++) {
+		state->keys[i] = 0;
 	}
 }
 
-void clear_keys(int* keys) {
+void handle_player(GameState* state) {
 	for (int i = 0; i < MAX_FRAME_KEYS; i++) {
-		keys[i] = 0;
-	}
-}
-
-void handle_player(int* keys, int* pos_x, int* pos_y) {
-	for (int i = 0; i < MAX_FRAME_KEYS; i++) {
-		switch(keys[i]) {
-			case 1:
-				*pos_y = MAX(1, *pos_y - 1);
+		switch(state->keys[i]) {
+			case 1: // UP
+				if (state->pos_y > 1) {
+					state->screen[state->pos_y][state->pos_x] = ' ';
+					state->screen[state->pos_y-1][state->pos_x] = '@';
+					state->pos_y--;
+				}
 				break;
-			case 2:
-				// left + right sides for 2 thickness
-				*pos_y = MIN(MAX_Y-2, *pos_y + 1);
+			case 2: // DOWN
+				if (state->pos_y < MAX_Y-2) {
+					state->screen[state->pos_y][state->pos_x] = ' ';
+					state->screen[state->pos_y+1][state->pos_x] = '@';
+					state->pos_y++;
+				}
 				break;
-			case 3:
-				// top + bottom + newline char at bottom
-				*pos_x = MIN(MAX_X-3, *pos_x + 1);
+			case 3: // RIGHT
+				if (state->pos_x < MAX_X - 3) {
+					state->screen[state->pos_y][state->pos_x] = ' ';
+					state->screen[state->pos_y][state->pos_x+1] = '@';
+					state->pos_x++;
+				}
 				break;
-			case 4:
-				*pos_x = MAX(1, *pos_x -1);
+			case 4: // LEFT
+				if (state->pos_x > 1) {
+					state->screen[state->pos_y][state->pos_x] = ' ';
+					state->screen[state->pos_y][state->pos_x-1] = '@';
+					state->pos_x--;
+				}
+				break;
 			default:
 				break;
 		}
 	}
+	clear_keys(state);
 }
 
-void render(int pos_x, int pos_y) {
-	CLEAR_SCREEN;
-	CURSOR_TO(0, 0);
-
-	for(int i = 0; i < MAX_X - 1; i++) {
-		printf("X");
-	}
-	printf("\n");
-
-	for(int i = 1; i < MAX_Y - 1; i++) {
-		printf("X");
-		for (int j = 1; j < MAX_X - 2; j++) {
-			if(pos_x == j && pos_y == i) {
-				printf("@");
-			}
-			else {
-				printf(" ");
+void render(GameState *state) {
+	for (int i = 0; i< MAX_Y; i++) {
+		for (int j = 0; j < MAX_X; j++) {
+			if(state->old_screen[i][j] != state->screen[i][j]) {
+				CURSOR_TO(i, j);
+				printf("%c", state->screen[i][j]);
 			}
 		}
-		printf("X\n");
 	}
-
-	for (int i = 0; i < MAX_X - 1; i++) {
-		printf("X");
-	}
-
 	fflush(stdout);
 }
 
+
+void update(GameState* state) {
+	memcpy(state->screen, state->old_screen, sizeof(state->screen));
+	handle_player(state);
+}
+
+void setup_board(GameState *state) {
+	memset(state->screen, ' ', sizeof(state->screen));
+	for( int i = 0; i < MAX_X - 1; i++) {
+		state->screen[0][i] = 'X';
+		state->screen[MAX_Y - 1][i] = 'X';
+	}
+
+	for (int j = 0; j < MAX_Y; j++) {
+		state->screen[j][0] = 'X';
+		state->screen[j][MAX_X-2] = 'X';
+		state->screen[j][MAX_X-1] = '\n';
+	}
+	state->screen[state->pos_y][state->pos_x] = '@';
+	render(state);
+}
 
 
 int main() {
@@ -161,19 +180,23 @@ int main() {
 	struct timespec end = {};
 	struct timespec sleep = {};
 
-	int keys[MAX_FRAME_KEYS];
+	CLEAR_SCREEN;
+	GameState state = {
+		.pos_x = 5,
+		.pos_y = 5
+	};
+	setup_board(&state);
 
-	int pos_x = 5;
-	int pos_y = 5;
+
 
 	while(!exit_loop) {
 		clock_gettime(CLOCK_MONOTONIC, &start);
+		
+		read_input(&state);
+		update(&state);
+		render(&state);
+		memcpy(state.old_screen, state.screen, sizeof(state.screen));
 
-		read_input(keys);
-		// print_keys(keys);
-		handle_player(keys, &pos_x, &pos_y);
-		render(pos_x, pos_y);
-		clear_keys(keys);
 
 		clock_gettime(CLOCK_MONOTONIC, &end);
 
