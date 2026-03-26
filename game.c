@@ -6,16 +6,29 @@
 #include <signal.h>
 #include <string.h>
 
+#define CLEAR_SCREEN (printf("\e[2J"))
+#define HIDE_CURSOR (printf("\e[?25l"))
+#define SHOW_CURSOR (printf("\e[?25h"))
+#define RESET_COLOR (printf("\e[m"))
+
 static struct termios old_termios, new_termios;
 
 #define MAX_FRAME_KEYS 4
 #define FRAME_NS 16666667
 
+#define MAX(a, b) (((a) > (b)) ? (a) : (b))
+#define MIN(a, b) (((a) > (b)) ? (b) : (a))
+#define CURSOR_TO(x, y) (printf("\e[%d;%dH", (x) + 1, (y) + 1))
+
+#define MAX_X 60
+#define MAX_Y 26
+
+
 static int exit_loop;
 
 void reset_terminal() {
-	printf("\e[m"); // esc seq for reset color changes
-	printf("\e[?25h"); // show cursor 
+	RESET_COLOR;
+	SHOW_CURSOR;
 	fflush(stdout);
 	tcsetattr(STDIN_FILENO, TCSANOW, &old_termios);
 }
@@ -30,7 +43,7 @@ void configure_terminal() {
 
 	tcsetattr(STDIN_FILENO, TCSANOW, &new_termios);
 
-	printf("\e[?25l"); // escape sequence for hide cursor
+	HIDE_CURSOR; // escape sequence for hide cursor
 	atexit(reset_terminal);
 }
 
@@ -86,6 +99,58 @@ void clear_keys(int* keys) {
 	}
 }
 
+void handle_player(int* keys, int* pos_x, int* pos_y) {
+	for (int i = 0; i < MAX_FRAME_KEYS; i++) {
+		switch(keys[i]) {
+			case 1:
+				*pos_y = MAX(1, *pos_y - 1);
+				break;
+			case 2:
+				// left + right sides for 2 thickness
+				*pos_y = MIN(MAX_Y-2, *pos_y + 1);
+				break;
+			case 3:
+				// top + bottom + newline char at bottom
+				*pos_x = MIN(MAX_X-3, *pos_x + 1);
+				break;
+			case 4:
+				*pos_x = MAX(1, *pos_x -1);
+			default:
+				break;
+		}
+	}
+}
+
+void render(int pos_x, int pos_y) {
+	CLEAR_SCREEN;
+	CURSOR_TO(0, 0);
+
+	for(int i = 0; i < MAX_X - 1; i++) {
+		printf("X");
+	}
+	printf("\n");
+
+	for(int i = 1; i < MAX_Y - 1; i++) {
+		printf("X");
+		for (int j = 1; j < MAX_X - 2; j++) {
+			if(pos_x == j && pos_y == i) {
+				printf("@");
+			}
+			else {
+				printf(" ");
+			}
+		}
+		printf("X\n");
+	}
+
+	for (int i = 0; i < MAX_X - 1; i++) {
+		printf("X");
+	}
+
+	fflush(stdout);
+}
+
+
 
 int main() {
 	configure_terminal();
@@ -98,11 +163,16 @@ int main() {
 
 	int keys[MAX_FRAME_KEYS];
 
+	int pos_x = 5;
+	int pos_y = 5;
+
 	while(!exit_loop) {
 		clock_gettime(CLOCK_MONOTONIC, &start);
 
 		read_input(keys);
-		print_keys(keys);
+		// print_keys(keys);
+		handle_player(keys, &pos_x, &pos_y);
+		render(pos_x, pos_y);
 		clear_keys(keys);
 
 		clock_gettime(CLOCK_MONOTONIC, &end);
