@@ -12,6 +12,7 @@
 #define RESET_COLOR (printf("\e[m"))
 
 
+#define LEVEL_1 ("./level_1.txt")
 
 #define MAX_FRAME_KEYS 4
 #define FRAME_NS 16666667
@@ -154,20 +155,32 @@ void update(GameState* state) {
 	handle_player(state);
 }
 
-void setup_board(GameState *state) {
-	memset(state->screen, ' ', sizeof(state->screen));
-	for( int i = 0; i < MAX_X - 1; i++) {
-		state->screen[0][i] = 'X';
-		state->screen[MAX_Y - 1][i] = 'X';
+void find_player_position(GameState* state) {
+	for(int i = 0; i < MAX_Y; i++) {
+		for(int j = 0; j < MAX_X; j++) {
+			if(state->screen[i][j] == '@') {
+				state->pos_x = j;
+				state->pos_y = i;
+				return;
+			}
+		}
 	}
+}
 
-	for (int j = 0; j < MAX_Y; j++) {
-		state->screen[j][0] = 'X';
-		state->screen[j][MAX_X-2] = 'X';
-		state->screen[j][MAX_X-1] = '\n';
+void load_level(GameState* state) {
+	FILE* f = fopen(LEVEL_1, "r");
+	if (!f) {
+		fprintf(stderr, "Failed to open %s\n", LEVEL_1);
+		exit(EXIT_FAILURE);
 	}
-	state->screen[state->pos_y][state->pos_x] = '@';
+	if (fread(state->screen, 1, MAX_X * MAX_Y, f) != MAX_X * MAX_Y) {
+		fprintf(stderr, "Failed to read %s\n", LEVEL_1);
+		exit(EXIT_FAILURE);
+	}
 	render(state);
+	find_player_position(state);
+	memcpy(state->old_screen, state->screen, sizeof(state->screen));
+	fclose(f);
 }
 
 
@@ -181,12 +194,9 @@ int main() {
 	struct timespec sleep = {};
 
 	CLEAR_SCREEN;
-	GameState state = {
-		.pos_x = 5,
-		.pos_y = 5
-	};
-	setup_board(&state);
+	GameState state = {};
 
+	load_level(&state);
 
 
 	while(!exit_loop) {
